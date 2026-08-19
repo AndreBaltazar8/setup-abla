@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - run: tests/static.sh
+
+  toolchain:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - macos-15
+          - macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - id: first
+        uses: ./
+        with:
+          version: 0.2.10
+      - name: Compile and run an Abla program
+        shell: bash
+        run: |
+          test '${{ steps.first.outputs.version }}' = 0.2.10
+          test '${{ steps.first.outputs.cache-hit }}' = false
+          test "$(ablac --version)" = 'ablac 0.2.10'
+          mkdir -p "$RUNNER_TEMP/abla-smoke"
+          printf 'fun main: int = 0\n' > "$RUNNER_TEMP/abla-smoke/main.ab"
+          cd "$RUNNER_TEMP/abla-smoke"
+          ablac build main.ab -o hello
+          ./hello
+      - id: second
+        uses: ./
+        with:
+          version: 0.2.10
+      - name: Verify the runner tool-cache hit
+        shell: bash
+        run: |
+          test '${{ steps.second.outputs.cache-hit }}' = true
+          test '${{ steps.second.outputs.path }}' = '${{ steps.first.outputs.path }}'

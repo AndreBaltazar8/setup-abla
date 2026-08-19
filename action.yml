@@ -1,0 +1,44 @@
+name: Setup Abla
+description: Install a checksum-verified released Abla toolchain and add it to PATH.
+author: André Baltazar
+
+branding:
+  icon: download
+  color: blue
+
+inputs:
+  version:
+    description: Exact Abla version to install, without the leading v.
+    required: false
+    default: 0.2.10
+  token:
+    description: GitHub token used to download public release assets.
+    required: false
+    default: ${{ github.token }}
+  install-dependencies:
+    description: Install missing native build prerequisites on supported hosted runners.
+    required: false
+    default: 'true'
+
+outputs:
+  version:
+    description: Exact installed Abla version.
+    value: ${{ steps.setup.outputs.version }}
+  path:
+    description: Absolute root of the installed Abla toolchain.
+    value: ${{ steps.setup.outputs.path }}
+  cache-hit:
+    description: Whether the matching toolchain was already in the runner tool cache.
+    value: ${{ steps.setup.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - id: setup
+      name: Install Abla
+      shell: bash
+      env:
+        SETUP_ABLA_VERSION: ${{ inputs.version }}
+        SETUP_ABLA_TOKEN: ${{ inputs.token }}
+        SETUP_ABLA_INSTALL_DEPENDENCIES: ${{ inputs.install-dependencies }}
+      run: "$GITHUB_ACTION_PATH/scripts/setup.sh"
