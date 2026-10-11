@@ -28,13 +28,13 @@ jobs:
       - id: first
         uses: ./
         with:
-          version: 0.2.10
+          version: 0.2.16
       - name: Compile and run an Abla program
         shell: bash
         run: |
-          test '${{ steps.first.outputs.version }}' = 0.2.10
+          test '${{ steps.first.outputs.version }}' = 0.2.16
           test '${{ steps.first.outputs.cache-hit }}' = false
-          test "$(ablac --version)" = 'ablac 0.2.10'
+          test "$(ablac --version)" = 'ablac 0.2.16'
           mkdir -p "$RUNNER_TEMP/abla-smoke"
           printf 'fun main: int = 0\n' > "$RUNNER_TEMP/abla-smoke/main.ab"
           cd "$RUNNER_TEMP/abla-smoke"
@@ -43,7 +43,7 @@ jobs:
       - id: second
         uses: ./
         with:
-          version: 0.2.10
+          version: 0.2.16
       - name: Verify the runner tool-cache hit
         shell: bash
         run: |

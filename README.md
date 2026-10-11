@@ -10,7 +10,7 @@ steps:
   - uses: actions/checkout@v6
   - uses: AndreBaltazar8/setup-abla@v1
     with:
-      version: '0.2.10'
+      version: '0.2.16'
   - run: ablac build app.ab -o build/app
 ```
 
@@ -21,7 +21,7 @@ chain. The moving `v1` tag is provided for convenient updates.
 
 | Input | Default | Meaning |
 | --- | --- | --- |
-| `version` | `0.2.10` | Exact Abla release, without the leading `v`. |
+| `version` | `0.2.16` | Exact Abla release, without the leading `v`. |
 | `token` | `github.token` | Token used for public GitHub release downloads. |
 | `install-dependencies` | `true` | Install missing host build prerequisites on Ubuntu or Homebrew packages on macOS. |
 
@@ -36,7 +36,11 @@ chain. The moving `v1` tag is provided for convenient updates.
 Linux x86-64 uses the portable Abla/LLVM/Binaryen release archive and the
 runner's ordinary glibc development files; on a minimal Ubuntu runner the
 action installs `build-essential` when needed. Intel and Apple Silicon macOS
-use their native precompiled compiler and Homebrew-provided native libraries.
+use their native precompiled compiler and Homebrew-provided native libraries:
+`llvm@23`, `lld@23`, `openssl@3` and `binaryen`.
+
+The action installs Abla 0.2.16 and later, the releases built on LLVM 23.
+Earlier releases link LLVM 21 and are not supported.
 Windows and Linux ARM64 fail with an explicit unsupported-platform message
 until Abla publishes those compiler artifacts.
 

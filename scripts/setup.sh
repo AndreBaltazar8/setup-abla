@@ -12,6 +12,12 @@ token=${SETUP_ABLA_TOKEN:-}
 
 [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] ||
     fail "version must be an exact semantic version without a leading v"
+# Releases before 0.2.16 link LLVM 21; the action provides LLVM 23.
+IFS=.- read -r version_major version_minor version_patch _ <<< "$version"
+if ((10#$version_major == 0 && (10#$version_minor < 2 ||
+    (10#$version_minor == 2 && 10#$version_patch < 16)))); then
+    fail "Abla $version links LLVM 21; this action installs Abla 0.2.16 and later (LLVM 23)"
+fi
 case "$install_dependencies" in
     true|false) ;;
     *) fail "install-dependencies must be true or false" ;;
@@ -59,7 +65,7 @@ add_macos_dependencies() {
         export HOMEBREW_NO_AUTO_UPDATE=1
         local missing=()
         local package
-        for package in llvm@21 lld@21 openssl@3 binaryen; do
+        for package in llvm@23 lld@23 openssl@3 binaryen; do
             if ! brew list --versions "$package" >/dev/null 2>&1; then
                 missing+=("$package")
             fi
@@ -70,10 +76,10 @@ add_macos_dependencies() {
     fi
 
     local llvm_bin lld_bin binaryen_bin
-    llvm_bin=$(brew --prefix llvm@21 2>/dev/null)/bin ||
-        fail "llvm@21 is missing; enable install-dependencies or install it first"
-    lld_bin=$(brew --prefix lld@21 2>/dev/null)/bin ||
-        fail "lld@21 is missing; enable install-dependencies or install it first"
+    llvm_bin=$(brew --prefix llvm@23 2>/dev/null)/bin ||
+        fail "llvm@23 is missing; enable install-dependencies or install it first"
+    lld_bin=$(brew --prefix lld@23 2>/dev/null)/bin ||
+        fail "lld@23 is missing; enable install-dependencies or install it first"
     binaryen_bin=$(brew --prefix binaryen 2>/dev/null)/bin ||
         fail "binaryen is missing; enable install-dependencies or install it first"
     export PATH="$llvm_bin:$lld_bin:$binaryen_bin:$PATH"
