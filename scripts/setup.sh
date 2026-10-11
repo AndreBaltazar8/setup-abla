@@ -56,29 +56,73 @@ case "$install_root" in
     *) fail "refusing unexpected tool-cache path" ;;
 esac
 
+# Homebrew no longer bottles LLVM 23 for Intel Macs, so x86_64 installs the
+# official checksum-pinned 23.1.0 Sonoma bottles (homebrew-core llvm 451e4146974a,
+# lld 4c53d1f9e8fe) and links them as llvm@23 and lld@23, the prefixes the
+# released launcher records.
+install_macos_bottle() {
+    local formula=$1 checksum=$2 token bottle
+    bottle="$RUNNER_TEMP/$formula--23.1.0.sonoma.bottle.tar.gz"
+    token=$(curl --fail --location --silent --show-error --retry 3 \
+        "https://ghcr.io/token?service=ghcr.io&scope=repository:homebrew/core/$formula:pull" |
+        /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+    curl --fail --location --silent --show-error --retry 3 \
+        --header "Authorization: Bearer $token" \
+        "https://ghcr.io/v2/homebrew/core/$formula/blobs/sha256:$checksum" -o "$bottle"
+    printf '%s  %s\n' "$checksum" "$bottle" | shasum -a 256 --check ||
+        fail "the $formula bottle failed its checksum"
+    # Runners forbid local package paths by default; this official bottle has
+    # just passed its pinned checksum check.
+    env -u HOMEBREW_FORBID_PACKAGES_FROM_PATHS HOMEBREW_DEVELOPER=1 \
+        brew install --ignore-dependencies "$bottle"
+}
+
 add_macos_dependencies() {
     [[ ${RUNNER_OS:-} == macOS ]] || return 0
     command -v brew >/dev/null 2>&1 ||
         fail "Homebrew is required on macOS to provide LLVM, LLD, OpenSSL, and Binaryen"
 
+    local brew_prefix llvm_prefix lld_prefix
+    brew_prefix=$(brew --prefix)
+    llvm_prefix="$brew_prefix/opt/llvm@23"
+    lld_prefix="$brew_prefix/opt/lld@23"
     if [[ $install_dependencies == true ]]; then
         export HOMEBREW_NO_AUTO_UPDATE=1
         local missing=()
         local package
-        for package in llvm@23 lld@23 openssl@3 binaryen; do
-            if ! brew list --versions "$package" >/dev/null 2>&1; then
-                missing+=("$package")
+        if [[ $platform == x86_64-macos ]]; then
+            export HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
+            for package in openssl@3 zstd z3 binaryen; do
+                if ! brew list --versions "$package" >/dev/null 2>&1; then
+                    brew install --force-bottle "$package"
+                fi
+            done
+            if [[ ! -x $llvm_prefix/bin/opt ]]; then
+                install_macos_bottle llvm 0b0168dc611a9d77aaa62d094178297f8a861d647cc59c43a5dc3f76bd6eb7b2
+                ln -sfn "$brew_prefix/opt/llvm" "$llvm_prefix"
             fi
-        done
-        if ((${#missing[@]} > 0)); then
-            brew install "${missing[@]}"
+            if [[ ! -x $lld_prefix/bin/wasm-ld ]]; then
+                install_macos_bottle lld c8affeb82959e53875d13cd58bc459f75863f17e3d4ad68d4ca939a104fd18d5
+                ln -sfn "$brew_prefix/opt/lld" "$lld_prefix"
+            fi
+        else
+            for package in llvm@23 lld@23 openssl@3 binaryen; do
+                if ! brew list --versions "$package" >/dev/null 2>&1; then
+                    missing+=("$package")
+                fi
+            done
+            if ((${#missing[@]} > 0)); then
+                brew install "${missing[@]}"
+            fi
         fi
     fi
 
     local llvm_bin lld_bin binaryen_bin
-    llvm_bin=$(brew --prefix llvm@23 2>/dev/null)/bin ||
+    llvm_bin="$llvm_prefix/bin"
+    lld_bin="$lld_prefix/bin"
+    [[ -x $llvm_bin/opt ]] ||
         fail "llvm@23 is missing; enable install-dependencies or install it first"
-    lld_bin=$(brew --prefix lld@23 2>/dev/null)/bin ||
+    [[ -x $lld_bin/wasm-ld ]] ||
         fail "lld@23 is missing; enable install-dependencies or install it first"
     binaryen_bin=$(brew --prefix binaryen 2>/dev/null)/bin ||
         fail "binaryen is missing; enable install-dependencies or install it first"

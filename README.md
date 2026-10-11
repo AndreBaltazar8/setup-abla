@@ -37,7 +37,9 @@ Linux x86-64 uses the portable Abla/LLVM/Binaryen release archive and the
 runner's ordinary glibc development files; on a minimal Ubuntu runner the
 action installs `build-essential` when needed. Intel and Apple Silicon macOS
 use their native precompiled compiler and Homebrew-provided native libraries:
-`llvm@23`, `lld@23`, `openssl@3` and `binaryen`.
+`llvm@23`, `lld@23`, `openssl@3` and `binaryen`. Homebrew doesn't bottle LLVM 23
+for Intel Macs, so there the action installs the official checksum-pinned 23.1.0
+`llvm` and `lld` bottles and links them as `llvm@23` and `lld@23`.
 
 The action installs Abla 0.2.16 and later, the releases built on LLVM 23.
 Earlier releases link LLVM 21 and are not supported.
