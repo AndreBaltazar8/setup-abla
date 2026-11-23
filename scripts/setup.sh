@@ -49,6 +49,17 @@ case ${RUNNER_OS:-} in
         ;;
 esac
 
+# Releases from `signed_since` on are signed: the release's SHA256SUMS carries an ssh-keygen -Y signature (namespace
+# abla-release) by the project key below (release-signing.pub of AndreBaltazar8/ablac), and the toolchain archive must be
+# listed there with its sha256. A signed release without a verifying signature is refused; earlier releases have only the
+# checksum file beside the archive.
+signed_since=0.2.67
+release_public_key='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFG/u2ZS1IXUdXaBlNmTKgE5o42RsTwkoLs0n61RWf1+ ablac release signing'
+signature_required=false
+if [[ $(printf '%s\n%s\n' "$signed_since" "$version" | sort -V | head -n 1) == "$signed_since" ]]; then
+    signature_required=true
+fi
+
 tool_cache=${RUNNER_TOOL_CACHE%/}
 install_root="$tool_cache/abla/$version/$platform"
 case "$install_root" in
@@ -65,7 +76,8 @@ install_macos_bottle() {
     bottle="$RUNNER_TEMP/$formula--23.1.0.sonoma.bottle.tar.gz"
     token=$(curl --fail --location --silent --show-error --retry 3 \
         "https://ghcr.io/token?service=ghcr.io&scope=repository:homebrew/core/$formula:pull" |
-        /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+        sed -n 's/.*"token" *: *"\([^"]*\)".*/\1/p')
+    [[ -n $token ]] || fail "no registry token for the $formula bottle"
     curl --fail --location --silent --show-error --retry 3 \
         --header "Authorization: Bearer $token" \
         "https://ghcr.io/v2/homebrew/core/$formula/blobs/sha256:$checksum" -o "$bottle"
@@ -197,6 +209,14 @@ if [[ $cache_hit == false ]]; then
         actual=$(shasum -a 256 "$work/$asset" | awk '{ print $1 }')
     fi
     [[ $actual == "$expected" ]] || fail "release checksum mismatch for $asset"
+    if [[ $signature_required == true ]]; then
+        curl "${curl_args[@]}" "$base/SHA256SUMS" -o "$work/SHA256SUMS" ||
+            fail "Abla $version is signed but has no SHA256SUMS; refusing it"
+        curl "${curl_args[@]}" "$base/SHA256SUMS.sig" -o "$work/SHA256SUMS.sig" ||
+            fail "Abla $version is signed but has no SHA256SUMS.sig; refusing it"
+        "$(dirname -- "${BASH_SOURCE[0]}")/verify-signed.sh" "$work" "$asset" "$release_public_key" ||
+            fail "the signature check of $asset failed"
+    fi
 
     expected_root="abla-toolchain-$platform"
     while IFS= read -r entry; do
