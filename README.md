@@ -43,11 +43,15 @@ for Intel Macs, so there the action installs the official checksum-pinned 23.1.0
 
 The action installs Abla 0.2.16 and later, the releases built on LLVM 23.
 Earlier releases link LLVM 21 and are not supported.
-Windows x86-64 installs the `abla-toolchain-x86_64-windows.zip` release asset: `bin\ablac.exe` (the compiler, with lld in its own process)
-beside `share/abla`, needing no other tool or Windows SDK. The action verifies it like the other archives (checksum, and the signature
-from 0.2.67), puts `bin` on the `PATH` and sets `ABLA_HOME` and `ABLA_SYSROOT` in the runner's path form. Use `shell: bash` or `pwsh`, as you like.
-It works from the first Abla release that ships the Windows asset; an earlier version fails naming the missing file. Linux ARM64 fails with an
-explicit unsupported-platform message until Abla publishes that compiler artifact.
+Windows x86-64 installs `abla-toolchain-x86_64-windows.zip` from Abla 0.2.68
+onward. On `windows-11-arm`, select Abla 0.2.69 or later to install
+`ablac-windows-arm64.zip`. Both packages contain `bin/ablac.exe`,
+`bin/llvm-objcopy.exe` and `share/abla`, with no external LLVM or Windows SDK
+required. The action verifies the checksum and release signature, adds
+`bin` to `PATH` and sets `ABLA_HOME` and `ABLA_SYSROOT` in the runner's
+path form. Both `bash` and `pwsh` can use the installed compiler.
+An older release fails naming the missing asset. Linux ARM64 reports an
+unsupported platform until Abla publishes that toolchain.
 
 ## Security
 

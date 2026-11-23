@@ -13,6 +13,7 @@ grep -Fq 'default: 0.2.16' "$project_root/action.yml"
 grep -Fq 'AndreBaltazar8/ablac/releases/download' "$project_root/scripts/setup.sh"
 grep -Fq 'release checksum mismatch' "$project_root/scripts/setup.sh"
 grep -Fq 'platform=x86_64-windows' "$project_root/scripts/setup.sh"
+grep -Fq 'platform=aarch64-windows' "$project_root/scripts/setup.sh"
 # shellcheck disable=SC2016  # the pattern is the script's own text
 grep -Fq 'abla-toolchain-$platform.$archive_extension' "$project_root/scripts/setup.sh"
 grep -Fq 'llvm@23 lld@23' "$project_root/scripts/setup.sh"
@@ -48,8 +49,6 @@ grep -q REFUSED "$work/out"
 # prints the version) installs, is a cache hit the second time and puts its bin directory on the PATH; a tampered zip, an entry outside the
 # top directory, a missing runtime or launcher, a wrong version and a missing asset are refused. Needs zip and unzip (skipped without).
 if command -v zip >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1; then
-    top=abla-toolchain-x86_64-windows
-    version=0.2.66
     build_zip() { # name of the zip's file in the release directory is fixed; $1 = what to break
         rm -rf "$work/tree" "$work/release"; mkdir -p "$work/tree/$top/bin" "$work/tree/$top/share/abla/stdlib" "$work/tree/$top/share/abla/runtime" "$work/release"
         printf '#!/bin/sh\necho "ablac %s"\n' "${2:-$version}" > "$work/tree/$top/bin/ablac.exe"; chmod +x "$work/tree/$top/bin/ablac.exe"
@@ -59,13 +58,13 @@ if command -v zip >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1; then
             no-runtime) rm -r "$work/tree/$top/share/abla/runtime" ;;
             stray) echo x > "$work/tree/stray.txt" ;;
         esac
-        (cd "$work/tree" && zip -q -r -X "$work/release/abla-toolchain-x86_64-windows.zip" .)
-        (cd "$work/release" && { sha256sum abla-toolchain-x86_64-windows.zip 2>/dev/null || shasum -a 256 abla-toolchain-x86_64-windows.zip; } > abla-toolchain-x86_64-windows.zip.sha256)
+        (cd "$work/tree" && zip -q -r -X "$work/release/$asset" .)
+        (cd "$work/release" && { sha256sum "$asset" 2>/dev/null || shasum -a 256 "$asset"; } > "$asset.sha256")
     }
     run_setup() { # fresh tool cache unless $1 = keep
         [[ ${1:-} == keep ]] || { rm -rf "$work/cache"; mkdir -p "$work/cache"; }
         mkdir -p "$work/temp"; : > "$work/github-path"; : > "$work/github-env"; : > "$work/github-output"
-        RUNNER_OS=Windows RUNNER_ARCH=X64 RUNNER_TOOL_CACHE="$work/cache" RUNNER_TEMP="$work/temp" GITHUB_PATH="$work/github-path" \
+        RUNNER_OS=Windows RUNNER_ARCH="$arch" RUNNER_TOOL_CACHE="$work/cache" RUNNER_TEMP="$work/temp" GITHUB_PATH="$work/github-path" \
             GITHUB_ENV="$work/github-env" GITHUB_OUTPUT="$work/github-output" SETUP_ABLA_VERSION="$version" \
             SETUP_ABLA_TEST_BASE="file://$work/release" "$project_root/scripts/setup.sh" > "$work/setup.out" 2>&1
     }
@@ -73,20 +72,28 @@ if command -v zip >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1; then
         if run_setup; then echo "setup-abla accepted: $1" >&2; exit 1; fi
         grep -Fq -- "$2" "$work/setup.out" || { echo "setup-abla's refusal of $1 does not say '$2':" >&2; cat "$work/setup.out" >&2; exit 1; }
     }
-    build_zip; run_setup || { cat "$work/setup.out" >&2; exit 1; }
-    grep -Fq "$work/cache/abla/$version/x86_64-windows/bin" "$work/github-path" || { echo 'the Windows bin directory is not on the PATH' >&2; exit 1; }
-    grep -Fq 'cache-hit=false' "$work/github-output" || { echo 'a first install reported a cache hit' >&2; exit 1; }
-    [[ -d $work/cache/abla/$version/x86_64-windows/share/abla/stdlib ]] || { echo 'no stdlib in the installed toolchain' >&2; exit 1; }
-    run_setup keep || { cat "$work/setup.out" >&2; exit 1; }
-    grep -Fq 'cache-hit=true' "$work/github-output" || { echo 'a second install was not a cache hit' >&2; exit 1; }
-    build_zip no-launcher; refused 'a zip without bin/ablac.exe' 'no ablac.exe launcher'
-    build_zip no-runtime; refused 'a zip without the runtime' 'no runtime'
-    build_zip stray; refused 'a zip with an entry outside the top directory' 'unexpected path'
-    build_zip '' 9.9.9; refused 'a compiler reporting another version' "instead of 'ablac $version'"
-    build_zip; printf 'x' >> "$work/release/abla-toolchain-x86_64-windows.zip"; refused 'a tampered zip' 'checksum mismatch'
-    rm -rf "$work/release"; mkdir "$work/release"; refused 'a release without the Windows asset' 'no abla-toolchain-x86_64-windows.zip'
-    # A signed release (0.2.67 and later) still needs its SHA256SUMS signature on Windows.
-    version=0.2.67; build_zip '' 0.2.67; refused 'an unsigned 0.2.67 release' 'SHA256SUMS'
+    for arch in X64 ARM64; do
+        case $arch in
+            X64) platform=x86_64-windows; asset=abla-toolchain-x86_64-windows.zip; signed_version=0.2.67 ;;
+            ARM64) platform=aarch64-windows; asset=ablac-windows-arm64.zip; signed_version=0.2.69 ;;
+        esac
+        top=abla-toolchain-$platform
+        version=0.2.66
+        build_zip; run_setup || { cat "$work/setup.out" >&2; exit 1; }
+        grep -Fxq "$work/cache/abla/$version/$platform/bin" "$work/github-path"
+        grep -Fxq "ABLA_SYSROOT=$work/cache/abla/$version/$platform/share/abla" "$work/github-env"
+        grep -Fxq 'cache-hit=false' "$work/github-output"
+        [[ -d $work/cache/abla/$version/$platform/share/abla/stdlib ]]
+        run_setup keep || { cat "$work/setup.out" >&2; exit 1; }
+        grep -Fxq 'cache-hit=true' "$work/github-output"
+        build_zip no-launcher; refused 'a zip without bin/ablac.exe' 'no ablac.exe launcher'
+        build_zip no-runtime; refused 'a zip without the runtime' 'no runtime'
+        build_zip stray; refused 'a zip with an entry outside the top directory' 'unexpected path'
+        build_zip '' 9.9.9; refused 'a compiler reporting another version' "instead of 'ablac $version'"
+        build_zip; printf 'x' >> "$work/release/$asset"; refused 'a tampered zip' 'checksum mismatch'
+        rm -rf "$work/release"; mkdir "$work/release"; refused 'a release without the Windows asset' "no $asset"
+        version=$signed_version; build_zip; refused 'a Windows release without its signature manifest' 'SHA256SUMS'
+    done
 else
     echo 'setup-abla: skipped the Windows end-to-end check (zip or unzip is not installed)'
 fi

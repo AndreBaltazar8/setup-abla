@@ -3,6 +3,12 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      windows_arm64_version:
+        description: Published ARM64 Windows toolchain version
+        default: '0.2.69'
+        type: string
 
 permissions:
   contents: read
@@ -49,3 +55,44 @@ jobs:
         run: |
           test '${{ steps.second.outputs.cache-hit }}' = true
           test '${{ steps.second.outputs.path }}' = '${{ steps.first.outputs.path }}'
+
+  windows-arm64:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - id: first
+        uses: ./
+        with:
+          version: ${{ inputs.windows_arm64_version }}
+      - name: Compile and run with the installed ARM64 toolchain
+        shell: pwsh
+        env:
+          ABLA_VERSION: ${{ steps.first.outputs.version }}
+        run: |
+          $env:Path = "$env:ABLA_HOME/bin;$env:SystemRoot/System32"
+          if ((ablac --version) -cne "ablac $env:ABLA_VERSION") { throw 'wrong compiler version' }
+          $pe = [IO.File]::ReadAllBytes((Get-Command ablac).Source)
+          $header = [BitConverter]::ToInt32($pe, 0x3c)
+          if ([BitConverter]::ToUInt16($pe, $header + 4) -ne 0xaa64) { throw 'expected an ARM64 compiler PE' }
+          Set-Location $env:RUNNER_TEMP
+          Set-Content -Encoding ascii hello.ab 'fun main: int = 42'
+          ablac build hello.ab -o hello.exe --backtrace
+          if ($LASTEXITCODE -ne 0) { throw 'hello build failed' }
+          if (!(Test-Path hello.exe.debug -PathType Leaf)) { throw 'split debug info missing' }
+          ./hello.exe
+          if ($LASTEXITCODE -ne 42) { throw "hello exited $LASTEXITCODE" }
+          exit 0
+      - id: second
+        uses: ./
+        with:
+          version: ${{ inputs.windows_arm64_version }}
+      - name: Verify the ARM64 tool-cache hit
+        shell: bash
+        env:
+          FIRST_PATH: ${{ steps.first.outputs.path }}
+          SECOND_PATH: ${{ steps.second.outputs.path }}
+          CACHE_HIT: ${{ steps.second.outputs.cache-hit }}
+        run: test "$CACHE_HIT" = true && test "$FIRST_PATH" = "$SECOND_PATH"

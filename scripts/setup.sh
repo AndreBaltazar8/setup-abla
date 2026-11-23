@@ -42,9 +42,11 @@ case ${RUNNER_OS:-} in
         esac
         ;;
     Windows)
-        [[ ${RUNNER_ARCH:-} == X64 ]] ||
-            fail "Windows ${RUNNER_ARCH:-unknown} is not published by Abla yet"
-        platform=x86_64-windows
+        case ${RUNNER_ARCH:-} in
+            X64) platform=x86_64-windows ;;
+            ARM64) platform=aarch64-windows ;;
+            *) fail "Windows ${RUNNER_ARCH:-unknown} is not published by Abla yet" ;;
+        esac
         ;;
     *)
         fail "unknown runner operating system: ${RUNNER_OS:-unset}"
@@ -54,7 +56,7 @@ esac
 # The Windows toolchain is a zip with bin/ablac.exe (tools/package-windows-toolchain.sh in ablac); the others are tar.gz with bin/ablac.
 archive_extension=tar.gz
 launcher_name=ablac
-if [[ $platform == x86_64-windows ]]; then
+if [[ $RUNNER_OS == Windows ]]; then
     archive_extension=zip
     launcher_name=ablac.exe
 fi
@@ -219,6 +221,7 @@ if [[ $cache_hit == false ]]; then
     trap cleanup EXIT INT TERM
 
     asset="abla-toolchain-$platform.$archive_extension"
+    if [[ $platform == aarch64-windows ]]; then asset=ablac-windows-arm64.zip; fi
     base="https://github.com/AndreBaltazar8/ablac/releases/download/v$version"
     curl_args=(--fail --location --silent --show-error --retry 3 --proto '=https' --tlsv1.2)
     # The static checks run the whole script against a release directory on disk (file:///...); nothing else changes the source.
@@ -267,7 +270,7 @@ if [[ $cache_hit == false ]]; then
     archive_extract "$work/$asset" "$work/extract"
     extracted="$work/extract/$expected_root"
     [[ -f $extracted/bin/$launcher_name ]] || fail "release archive has no $launcher_name launcher"
-    [[ $platform == x86_64-windows ]] || [[ -x $extracted/bin/$launcher_name ]] || fail "release archive's $launcher_name is not executable"
+    [[ $RUNNER_OS == Windows ]] || [[ -x $extracted/bin/$launcher_name ]] || fail "release archive's $launcher_name is not executable"
     [[ -d $extracted/share/abla/stdlib ]] || fail "release archive has no standard library"
     [[ -d $extracted/share/abla/runtime ]] || fail "release archive has no runtime"
 
