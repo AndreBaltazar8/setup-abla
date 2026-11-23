@@ -42,12 +42,39 @@ case ${RUNNER_OS:-} in
         esac
         ;;
     Windows)
-        fail "Windows is not supported by the released Abla compiler yet"
+        [[ ${RUNNER_ARCH:-} == X64 ]] ||
+            fail "Windows ${RUNNER_ARCH:-unknown} is not published by Abla yet"
+        platform=x86_64-windows
         ;;
     *)
         fail "unknown runner operating system: ${RUNNER_OS:-unset}"
         ;;
 esac
+
+# The Windows toolchain is a zip with bin/ablac.exe (tools/package-windows-toolchain.sh in ablac); the others are tar.gz with bin/ablac.
+archive_extension=tar.gz
+launcher_name=ablac
+if [[ $platform == x86_64-windows ]]; then
+    archive_extension=zip
+    launcher_name=ablac.exe
+fi
+# Git Bash on a Windows runner: paths from the runner are C:\... (cygpath -u makes them POSIX for the shell, -m back to C:/...); a no-op elsewhere.
+posix_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -u "$1"; else printf '%s\n' "$1"; fi; }
+windows_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s\n' "$1"; fi; }
+
+# Listing and unpacking the toolchain archive: tar.gz with tar; a zip (Windows) with unzip when the runner has it, else Windows's own
+# bsdtar (System32\tar.exe, on every hosted Windows runner), which reads zips. Git Bash's tar is GNU tar and cannot.
+system_tar() { printf '%s/System32/tar.exe\n' "$(posix_path "${SYSTEMROOT:-C:/Windows}")"; }
+archive_list() {
+    if [[ $archive_extension == tar.gz ]]; then tar -tzf "$1"
+    elif command -v unzip >/dev/null 2>&1; then unzip -Z1 "$1"
+    else "$(system_tar)" -tf "$(windows_path "$1")"; fi
+}
+archive_extract() {
+    if [[ $archive_extension == tar.gz ]]; then tar -xzf "$1" -C "$2"
+    elif command -v unzip >/dev/null 2>&1; then unzip -q "$1" -d "$2"
+    else "$(system_tar)" -xf "$(windows_path "$1")" -C "$(windows_path "$2")"; fi
+}
 
 # Releases from `signed_since` on are signed: the release's SHA256SUMS carries an ssh-keygen -Y signature (namespace
 # abla-release) by the project key below (release-signing.pub of AndreBaltazar8/ablac), and the toolchain archive must be
@@ -60,7 +87,8 @@ if [[ $(printf '%s\n%s\n' "$signed_since" "$version" | sort -V | head -n 1) == "
     signature_required=true
 fi
 
-tool_cache=${RUNNER_TOOL_CACHE%/}
+tool_cache=$(posix_path "${RUNNER_TOOL_CACHE%/}")
+temp_root=$(posix_path "$RUNNER_TEMP")
 install_root="$tool_cache/abla/$version/$platform"
 case "$install_root" in
     "$tool_cache"/abla/*) ;;
@@ -169,8 +197,8 @@ add_linux_dependencies() {
 }
 
 cache_hit=false
-if [[ -x $install_root/bin/ablac && -f $install_root/.complete ]]; then
-    cached_version=$("$install_root/bin/ablac" --version 2>/dev/null || true)
+if [[ -x $install_root/bin/$launcher_name && -f $install_root/.complete ]]; then
+    cached_version=$("$install_root/bin/$launcher_name" --version 2>/dev/null | tr -d '\r' || true)
     if [[ $cached_version == "ablac $version" ]]; then
         cache_hit=true
     fi
@@ -180,9 +208,9 @@ add_linux_dependencies
 add_macos_dependencies
 
 if [[ $cache_hit == false ]]; then
-    work=$(mktemp -d "$RUNNER_TEMP/setup-abla.XXXXXX")
+    work=$(mktemp -d "$temp_root/setup-abla.XXXXXX")
     case "$work" in
-        "$RUNNER_TEMP"/setup-abla.*) ;;
+        "$temp_root"/setup-abla.*) ;;
         *) fail "refusing unexpected temporary path" ;;
     esac
     cleanup() {
@@ -190,14 +218,20 @@ if [[ $cache_hit == false ]]; then
     }
     trap cleanup EXIT INT TERM
 
-    asset="abla-toolchain-$platform.tar.gz"
+    asset="abla-toolchain-$platform.$archive_extension"
     base="https://github.com/AndreBaltazar8/ablac/releases/download/v$version"
     curl_args=(--fail --location --silent --show-error --retry 3 --proto '=https' --tlsv1.2)
+    # The static checks run the whole script against a release directory on disk (file:///...); nothing else changes the source.
+    if [[ ${SETUP_ABLA_TEST_BASE:-} == file:///* ]]; then
+        base=$SETUP_ABLA_TEST_BASE
+        curl_args=(--fail --silent --show-error --proto '=file')
+    fi
     if [[ -n $token ]]; then
         printf '::add-mask::%s\n' "$token"
         curl_args+=(--header "Authorization: Bearer $token")
     fi
-    curl "${curl_args[@]}" "$base/$asset" -o "$work/$asset"
+    curl "${curl_args[@]}" "$base/$asset" -o "$work/$asset" ||
+        fail "no $asset in the Abla $version release (a platform's toolchain is published from the first release that ships it)"
     curl "${curl_args[@]}" "$base/$asset.sha256" -o "$work/$asset.sha256"
 
     expected=$(awk 'NR == 1 && $1 ~ /^[0-9a-fA-F]{64}$/ { print tolower($1) }' \
@@ -227,12 +261,13 @@ if [[ $cache_hit == false ]]; then
         case "/$entry/" in
             *'/../'*) fail "release archive contains a parent traversal" ;;
         esac
-    done < <(tar -tzf "$work/$asset")
+    done < <(archive_list "$work/$asset")
 
     mkdir -p "$work/extract" "$tool_cache/abla/$version"
-    tar -xzf "$work/$asset" -C "$work/extract"
+    archive_extract "$work/$asset" "$work/extract"
     extracted="$work/extract/$expected_root"
-    [[ -x $extracted/bin/ablac ]] || fail "release archive has no ablac launcher"
+    [[ -f $extracted/bin/$launcher_name ]] || fail "release archive has no $launcher_name launcher"
+    [[ $platform == x86_64-windows ]] || [[ -x $extracted/bin/$launcher_name ]] || fail "release archive's $launcher_name is not executable"
     [[ -d $extracted/share/abla/stdlib ]] || fail "release archive has no standard library"
     [[ -d $extracted/share/abla/runtime ]] || fail "release archive has no runtime"
 
@@ -243,14 +278,15 @@ if [[ $cache_hit == false ]]; then
     printf '%s\n' "$version" > "$install_root/.complete"
 fi
 
-actual_version=$("$install_root/bin/ablac" --version)
+actual_version=$("$install_root/bin/$launcher_name" --version | tr -d '\r')
 [[ $actual_version == "ablac $version" ]] ||
     fail "installed compiler reported '$actual_version' instead of 'ablac $version'"
 
-printf '%s\n' "$install_root/bin" >> "$GITHUB_PATH"
+# The runner reads GITHUB_PATH and GITHUB_ENV in its own (Windows) path form; ablac.exe finds its sysroot beside itself.
+printf '%s\n' "$(windows_path "$install_root/bin")" >> "$GITHUB_PATH"
 printf 'ABLA_HOME=%s\nABLA_SYSROOT=%s\n' \
-    "$install_root" "$install_root/share/abla" >> "$GITHUB_ENV"
+    "$(windows_path "$install_root")" "$(windows_path "$install_root/share/abla")" >> "$GITHUB_ENV"
 printf 'version=%s\npath=%s\ncache-hit=%s\n' \
-    "$version" "$install_root" "$cache_hit" >> "$GITHUB_OUTPUT"
+    "$version" "$(windows_path "$install_root")" "$cache_hit" >> "$GITHUB_OUTPUT"
 printf 'Installed Abla %s for %s (cache hit: %s).\n' \
     "$version" "$platform" "$cache_hit"
