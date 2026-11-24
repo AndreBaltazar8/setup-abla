@@ -88,6 +88,32 @@ jobs:
           FIRST_CACHE_HIT: ${{ steps.first.outputs.cache-hit }}
           SECOND_CACHE_HIT: ${{ steps.second.outputs.cache-hit }}
         run: test "$FIRST_CACHE_HIT" = false && test "$SECOND_CACHE_HIT" = true && test "$FIRST_PATH" = "$SECOND_PATH"
+      - name: Build and run a fast program twice with the default cache
+        shell: pwsh
+        env:
+          ABLA_VERSION: ${{ steps.first.outputs.version }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $env:Path = "$env:ABLA_HOME/bin;$env:SystemRoot/System32"
+          $work = Join-Path $env:RUNNER_TEMP 'abla-fast-smoke'
+          New-Item -ItemType Directory -Path $work | Out-Null
+          Set-Location $work
+          $env:ABLA_CACHE_DIR = Join-Path $work 'cache'
+          Set-Content -Encoding ascii app.ab 'fun main: int = 42'
+          $failed = $false
+          foreach ($build in 'first cached', 'second cached', 'no-cache') {
+            $flags = @('build', 'app.ab', '--fast', '-o', 'app.exe')
+            if ($build -eq 'no-cache') { $flags += '--no-cache' }
+            if (Test-Path app.exe) { Remove-Item app.exe }
+            ablac @flags
+            $status = $LASTEXITCODE
+            Write-Host "Abla $env:ABLA_VERSION $env:RUNNER_ARCH --fast $build build exit $status"
+            if ($status -ne 0) { $failed = $true; continue }
+            ./app.exe
+            if ($LASTEXITCODE -ne 42) { $failed = $true; Write-Host "$build app exited $LASTEXITCODE instead of 42" }
+          }
+          if ($failed) { throw 'Windows fast-build smoke failed' }
+          exit 0
       - name: Compile and run with the installed Windows toolchain
         shell: pwsh
         env:
