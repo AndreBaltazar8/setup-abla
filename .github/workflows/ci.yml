@@ -5,9 +5,12 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      version:
+        description: Published Abla version to test on all five runners
+        default: '0.2.70'
+        type: string
       windows_arm64_version:
-        description: Published Windows toolchain version for both architectures
-        default: '0.2.69'
+        description: Optional Windows-only version override for both architectures
         type: string
 
 permissions:
@@ -29,18 +32,23 @@ jobs:
           - macos-15
           - macos-15-intel
     runs-on: ${{ matrix.runner }}
+    env:
+      REQUESTED_VERSION: ${{ inputs.version || '0.2.16' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - id: first
         uses: ./
         with:
-          version: 0.2.16
+          version: ${{ env.REQUESTED_VERSION }}
       - name: Compile and run an Abla program
         shell: bash
+        env:
+          INSTALLED_VERSION: ${{ steps.first.outputs.version }}
+          FIRST_CACHE_HIT: ${{ steps.first.outputs.cache-hit }}
         run: |
-          test '${{ steps.first.outputs.version }}' = 0.2.16
-          test '${{ steps.first.outputs.cache-hit }}' = false
-          test "$(ablac --version)" = 'ablac 0.2.16'
+          test "$INSTALLED_VERSION" = "$REQUESTED_VERSION"
+          test "$FIRST_CACHE_HIT" = false
+          test "$(ablac --version)" = "ablac $REQUESTED_VERSION"
           mkdir -p "$RUNNER_TEMP/abla-smoke"
           printf 'fun main: int = 0\n' > "$RUNNER_TEMP/abla-smoke/main.ab"
           cd "$RUNNER_TEMP/abla-smoke"
@@ -49,7 +57,7 @@ jobs:
       - id: second
         uses: ./
         with:
-          version: 0.2.16
+          version: ${{ env.REQUESTED_VERSION }}
       - name: Verify the runner tool-cache hit
         shell: bash
         run: |
@@ -75,11 +83,11 @@ jobs:
       - id: first
         uses: ./
         with:
-          version: ${{ inputs.windows_arm64_version }}
+          version: ${{ inputs.windows_arm64_version || inputs.version }}
       - id: second
         uses: ./
         with:
-          version: ${{ inputs.windows_arm64_version }}
+          version: ${{ inputs.windows_arm64_version || inputs.version }}
       - name: Verify the runner tool-cache hit
         shell: bash
         env:
