@@ -44,6 +44,20 @@ if verify; then echo 'accepted an unsigned release' >&2; exit 1; fi
 release; sed -i.bak 's/abla-toolchain-x86_64-linux.tar.gz/other.tar.gz/' "$work/rel/SHA256SUMS"; rm -f "$work/rel/SHA256SUMS.bak"
 if verify; then echo 'accepted a modified SHA256SUMS' >&2; exit 1; fi
 grep -q REFUSED "$work/out"
+# With the version asked for, the signed list must be that release's (its bill of materials), not another's.
+grep -Fq 'release_signing_keys=' "$project_root/scripts/setup.sh"
+versioned() { # bill of materials names to list
+    release
+    for name in "$@"; do printf '{}\n' > "$work/rel/$name"; done
+    (cd "$work/rel" && { sha256sum abla-toolchain-x86_64-linux.tar.gz "$@" 2>/dev/null || shasum -a 256 abla-toolchain-x86_64-linux.tar.gz "$@"; } > SHA256SUMS)
+    rm -f "$work/rel/SHA256SUMS.sig"
+    ssh-keygen -Y sign -f "$work/key" -n abla-release "$work/rel/SHA256SUMS" >/dev/null 2>&1
+}
+verify_version() { "$project_root/scripts/verify-signed.sh" "$work/rel" abla-toolchain-x86_64-linux.tar.gz "$public" "$1" > "$work/out" 2>&1; }
+versioned ablac-0.3.0.spdx.json; verify_version 0.3.0 || { cat "$work/out" >&2; exit 1; }
+if verify_version 0.3.1; then echo "accepted 0.3.0's signed list for 0.3.1" >&2; exit 1; fi
+versioned; if verify_version 0.3.0; then echo 'accepted a signed list without a bill of materials' >&2; exit 1; fi
+versioned ablac-0.3.0.spdx.json ablac-0.2.9.spdx.json; if verify_version 0.3.0; then echo 'accepted a signed list with two bills of materials' >&2; exit 1; fi
 
 # The Windows path end to end against a release directory on disk (SETUP_ABLA_TEST_BASE): a zip with bin/ablac.exe (here a script that
 # prints the version) installs, is a cache hit the second time and puts its bin directory on the PATH; a tampered zip, an entry outside the

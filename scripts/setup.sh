@@ -79,14 +79,26 @@ archive_extract() {
 }
 
 # Releases from `signed_since` on are signed: the release's SHA256SUMS carries an ssh-keygen -Y signature (namespace
-# abla-release) by the project key below (release-signing.pub of AndreBaltazar8/ablac), and the toolchain archive must be
-# listed there with its sha256. A signed release without a verifying signature is refused; earlier releases have only the
-# checksum file beside the archive.
-signed_since=0.2.67
-release_public_key='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFG/u2ZS1IXUdXaBlNmTKgE5o42RsTwkoLs0n61RWf1+ ablac release signing'
+# abla-release), and the toolchain archive must be listed there with its sha256. Which key signs which releases is the
+# table below, the same rows as tools/release-signing-keys of AndreBaltazar8/ablac: `FIRST LAST KEY`, LAST `-` while the
+# key still signs. A release verifies only under the key of its own range, and its SHA256SUMS must be that release's (it
+# lists ablac-VERSION.spdx.json). A signed release without a verifying signature is refused; earlier releases have only
+# the checksum file beside the archive.
+release_signing_keys='0.2.67 - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFG/u2ZS1IXUdXaBlNmTKgE5o42RsTwkoLs0n61RWf1+ ablac release signing'
+version_le() { [[ $(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1) == "$1" ]]; }
+signed_since=$(awk 'NR == 1 { print $1 }' <<< "$release_signing_keys")
 signature_required=false
-if [[ $(printf '%s\n%s\n' "$signed_since" "$version" | sort -V | head -n 1) == "$signed_since" ]]; then
+release_public_key=
+if version_le "$signed_since" "$version"; then
     signature_required=true
+    matches=0
+    while read -r first last key_line; do
+        version_le "$first" "$version" || continue
+        [[ $last == - ]] || version_le "$version" "$last" || continue
+        release_public_key=$key_line
+        matches=$((matches + 1))
+    done <<< "$release_signing_keys"
+    [[ $matches -eq 1 ]] || fail "no single signing key for Abla $version; refusing it"
 fi
 
 tool_cache=$(posix_path "${RUNNER_TOOL_CACHE%/}")
@@ -251,7 +263,7 @@ if [[ $cache_hit == false ]]; then
             fail "Abla $version is signed but has no SHA256SUMS; refusing it"
         curl "${curl_args[@]}" "$base/SHA256SUMS.sig" -o "$work/SHA256SUMS.sig" ||
             fail "Abla $version is signed but has no SHA256SUMS.sig; refusing it"
-        "$(dirname -- "${BASH_SOURCE[0]}")/verify-signed.sh" "$work" "$asset" "$release_public_key" ||
+        "$(dirname -- "${BASH_SOURCE[0]}")/verify-signed.sh" "$work" "$asset" "$release_public_key" "$version" ||
             fail "the signature check of $asset failed"
     fi
 
